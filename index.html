@@ -97,8 +97,8 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 @keyframes tin{from{transform:translateX(16px);opacity:0}}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 .prog-bar{height:3px;background:var(--accent);transition:width .3s;border-radius:2px}
-.dose-tip{position:fixed;z-index:9999;background:rgba(10,12,16,.92);border:1px solid var(--accent);border-radius:6px;padding:6px 10px;pointer-events:none;display:none;min-width:120px}
-.dose-tip-val{font-size:15px;font-weight:700;color:var(--dose)}
+.dose-tip{position:absolute;bottom:36px;right:8px;z-index:20;background:rgba(10,12,16,.88);border:1px solid var(--accent);border-radius:6px;padding:5px 9px;pointer-events:none;display:none;min-width:110px}
+.dose-tip-val{font-size:14px;font-weight:700;color:var(--dose)}
 .dose-tip-lbl{font-size:10px;color:var(--text2);margin-top:1px}
 .dose-tip-pos{font-size:10px;color:var(--text2);margin-top:2px;font-family:monospace}
 .crosshair{position:absolute;pointer-events:none;z-index:15;display:none}
@@ -158,11 +158,6 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   </div>
 </div>
 <div class="toasts" id="toasts"></div>
-<div class="dose-tip" id="doseTip">
-  <div class="dose-tip-val" id="doseTipVal">— Gy</div>
-  <div class="dose-tip-lbl" id="doseTipLbl">Dosis am Cursor</div>
-  <div class="dose-tip-pos" id="doseTipPos"></div>
-</div>
 
 <script src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
 <script>
@@ -731,10 +726,14 @@ function renderImgViewer(container, f) {
       <div class="sp-lbl">${lbl}</div><div class="sp-pos" id="pos-${a}"></div>
       <div class="sp-wrap" id="wrap-${a}"
            onmousemove="onPanelMouseMove(event,'${a}')"
-           onclick="onPanelClick(event,'${a}')"
-           onmouseleave="hideDoseTip()">
+           onmouseleave="hideDoseTip('${a}')">
         <canvas id="cv-${a}"></canvas>
         <div id="ld-${a}" class="sp-loading">Lade...</div>
+        <div class="dose-tip" id="tip-${a}">
+          <div class="dose-tip-val" id="tipVal-${a}">—</div>
+          <div class="dose-tip-lbl" id="tipLbl-${a}"></div>
+          <div class="dose-tip-pos" id="tipPos-${a}"></div>
+        </div>
         <div class="sp-btns">
           <button class="sp-btn" onclick="rotate('${a}',-90)" title="Links drehen">↺</button>
           <button class="sp-btn" onclick="rotate('${a}',90)" title="Rechts drehen">↻</button>
@@ -1016,54 +1015,40 @@ function getImagePixel(axis, clientX, clientY) {
   return { imgX, imgY, val, type: px.type, maxDose: px.maxDose };
 }
 
-function showDoseTip(clientX, clientY, result) {
+function showDoseTip(axis, result) {
   if (!result) return;
-  const tip = document.getElementById('doseTip');
-  const val  = document.getElementById('doseTipVal');
-  const lbl  = document.getElementById('doseTipLbl');
-  const psel = document.getElementById('doseTipPos');
+  const tip = document.getElementById(`tip-${axis}`);
+  const val = document.getElementById(`tipVal-${axis}`);
+  const lbl = document.getElementById(`tipLbl-${axis}`);
+  const pos = document.getElementById(`tipPos-${axis}`);
+  if (!tip) return;
 
   if (result.type === 'dose') {
-    val.textContent  = result.val.toFixed(3) + ' Gy';
-    val.style.color  = 'var(--dose)';
-    lbl.textContent  = `Dosis (${result.val>0 ? ((result.val/result.maxDose)*100).toFixed(1)+'% max' : 'kein Isodose'})`;
+    val.textContent = result.val.toFixed(3) + ' Gy';
+    val.style.color = 'var(--dose)';
+    lbl.textContent = result.val > 0 ? ((result.val / result.maxDose) * 100).toFixed(1) + '% des Max' : 'kein Isodose';
   } else {
-    val.textContent  = Math.round(result.val) + ' HU';
-    val.style.color  = 'var(--ct)';
-    lbl.textContent  = 'Hounsfield Units';
+    val.textContent = Math.round(result.val) + ' HU';
+    val.style.color = 'var(--ct)';
+    lbl.textContent = 'Hounsfield Units';
   }
-  psel.textContent = `Pixel (${result.imgX}, ${result.imgY})`;
-
-  // Position tooltip near cursor, keep inside viewport
-  const margin = 14;
-  let tx = clientX + margin;
-  let ty = clientY + margin;
-  if (tx + 150 > window.innerWidth)  tx = clientX - 155;
-  if (ty + 80  > window.innerHeight) ty = clientY - 85;
-
-  tip.style.left    = tx + 'px';
-  tip.style.top     = ty + 'px';
+  pos.textContent = `x=${result.imgX} y=${result.imgY}`;
   tip.style.display = 'block';
 }
 
-function hideDoseTip() {
-  document.getElementById('doseTip').style.display = 'none';
+function hideDoseTip(axis) {
+  const tip = document.getElementById(`tip-${axis}`);
+  if (tip) tip.style.display = 'none';
 }
 
 function onPanelMouseMove(e, axis) {
   const result = getImagePixel(axis, e.clientX, e.clientY);
-  if (result) showDoseTip(e.clientX, e.clientY, result);
+  showDoseTip(axis, result);
 }
 
 function onPanelClick(e, axis) {
-  // Click pins the tooltip (toggle pin)
   const result = getImagePixel(axis, e.clientX, e.clientY);
-  if (!result) return;
-  showDoseTip(e.clientX, e.clientY, result);
-  // Add a brief highlight flash
-  const tip = document.getElementById('doseTip');
-  tip.style.borderColor = result.type==='dose' ? 'var(--dose)' : 'var(--ct)';
-  setTimeout(() => tip.style.borderColor = 'var(--accent)', 600);
+  showDoseTip(axis, result);
 }
 
 // ── Rotation & Flip ──────────────────────────────────────────────────────────
