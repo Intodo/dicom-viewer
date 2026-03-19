@@ -97,6 +97,13 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 @keyframes tin{from{transform:translateX(16px);opacity:0}}
 ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
 .prog-bar{height:3px;background:var(--accent);transition:width .3s;border-radius:2px}
+.dose-tip{position:fixed;z-index:9999;background:rgba(10,12,16,.92);border:1px solid var(--accent);border-radius:6px;padding:6px 10px;pointer-events:none;display:none;min-width:120px}
+.dose-tip-val{font-size:15px;font-weight:700;color:var(--dose)}
+.dose-tip-lbl{font-size:10px;color:var(--text2);margin-top:1px}
+.dose-tip-pos{font-size:10px;color:var(--text2);margin-top:2px;font-family:monospace}
+.crosshair{position:absolute;pointer-events:none;z-index:15;display:none}
+.crosshair-h{position:absolute;left:0;right:0;height:1px;background:rgba(255,200,0,.7);top:50%;transform:translateY(-50%)}
+.crosshair-v{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,200,0,.7);left:50%;transform:translateX(-50%)}
 </style>
 </head>
 <body>
@@ -151,6 +158,11 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
   </div>
 </div>
 <div class="toasts" id="toasts"></div>
+<div class="dose-tip" id="doseTip">
+  <div class="dose-tip-val" id="doseTipVal">— Gy</div>
+  <div class="dose-tip-lbl" id="doseTipLbl">Dosis am Cursor</div>
+  <div class="dose-tip-pos" id="doseTipPos"></div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
 <script>
@@ -717,7 +729,10 @@ function renderImgViewer(container, f) {
     const lbl={axial:'Axial',coronal:'Koronal',sagittal:'Sagittal'}[a];
     return `<div class="sp" id="sp-${a}">
       <div class="sp-lbl">${lbl}</div><div class="sp-pos" id="pos-${a}"></div>
-      <div class="sp-wrap">
+      <div class="sp-wrap" id="wrap-${a}"
+           onmousemove="onPanelMouseMove(event,'${a}')"
+           onclick="onPanelClick(event,'${a}')"
+           onmouseleave="hideDoseTip()">
         <canvas id="cv-${a}"></canvas>
         <div id="ld-${a}" class="sp-loading">Lade...</div>
         <div class="sp-btns">
@@ -790,6 +805,7 @@ function drawSlice(axis) {
           doseRS[r*w+c]=dc.data[dZI*dc.cols+dXI]||0;
         }
         ctSlice=ct.data; doseSlice=doseRS;
+        S.slices[axis].px={type:'dose', data:doseRS, dataW:w, dataH:h, maxDose:doseF.maxDose};
         const scaleZ=series.zSpacing/ctSp[1];
         const dispH=Math.round(h*scaleZ);
         renderScaled(cv, null, w, h, w, dispH, (c)=>renderOverlay(c,ctSlice,doseSlice,w,h,S.wc,S.ww,S.ovlOpacity,0.05,doseF.maxDose||1));
@@ -812,11 +828,14 @@ function drawSlice(axis) {
           doseRS[r*w+c]=ds2.data[dZI*ds2.cols+dYI]||0;
         }
         ctSlice=ct.data; doseSlice=doseRS;
+        S.slices[axis].px={type:'dose', data:doseRS, dataW:w, dataH:h, maxDose:doseF.maxDose};
         const scaleZ=series.zSpacing/ctSp[0];
         const dispH=Math.round(h*scaleZ);
         renderScaled(cv, null, w, h, w, dispH, (c)=>renderOverlay(c,ctSlice,doseSlice,w,h,S.wc,S.ww,S.ovlOpacity,0.05,doseF.maxDose||1));
         if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`; return;
       }
+      // store for click lookup (axial only — coronal/sagittal return early above)
+      S.slices[axis].px = {type:'dose', data: doseSlice, dataW:w, dataH:h, maxDose:doseF.maxDose};
       renderOverlay(cv, ctSlice, doseSlice, w, h, S.wc, S.ww, S.ovlOpacity, 0.05, doseF.maxDose||1);
 
     } else if(mod==='CT') {
@@ -825,13 +844,16 @@ function drawSlice(axis) {
       const rSp=series.spacing[0], cSp=series.spacing[1], zSp=series.zSpacing;
       if(axis==='axial'){
         const i=Math.min(idx,nz-1); S.slices.axial.i=i;
-        renderGray(cv, series.axialSlice(i), nx, ny, S.wc, S.ww);
+        const huSlice=series.axialSlice(i);
+        S.slices[axis].px={type:'hu', data:huSlice, dataW:nx, dataH:ny};
+        renderGray(cv, huSlice, nx, ny, S.wc, S.ww);
         if(sl){sl.max=nz-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nz}`;
         if(pos) pos.textContent=`z=${series.slices[i].z.toFixed(1)}mm`;
       } else if(axis==='coronal'){
         series.buildVolume();
         const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
         const {data,rows,cols}=series.coronalSlice(i); // rows=nz, cols=nx
+        S.slices[axis].px={type:'hu', data, dataW:cols, dataH:rows};
         const scaleZ=zSp/cSp;
         renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
           (c,d,w,h)=>renderGray(c,d,w,h,S.wc,S.ww));
@@ -840,6 +862,7 @@ function drawSlice(axis) {
         series.buildVolume();
         const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
         const {data,rows,cols}=series.sagittalSlice(i); // rows=nz, cols=ny
+        S.slices[axis].px={type:'hu', data, dataW:cols, dataH:rows};
         const scaleZ=zSp/rSp;
         renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
           (c,d,w,h)=>renderGray(c,d,w,h,S.wc,S.ww));
@@ -847,23 +870,27 @@ function drawSlice(axis) {
       }
     } else if(mod==='RTDOSE') {
       const nz=f.numFrames,ny=f.rows,nx=f.cols;
-      const dSp=f.spacing; // [rowSpacing, colSpacing]
+      const dSp=f.spacing;
       const dZSp=f.zPos.length>1?Math.abs(f.zPos[1]-f.zPos[0]):dSp[0];
       if(axis==='axial'){
         const i=Math.min(idx,nz-1); S.slices.axial.i=i;
-        renderJet(cv, doseAxialSlice(f,i), nx, ny, f.maxDose||1);
+        const sliceData=doseAxialSlice(f,i);
+        S.slices[axis].px={type:'dose', data:sliceData, dataW:nx, dataH:ny, maxDose:f.maxDose};
+        renderJet(cv, sliceData, nx, ny, f.maxDose||1);
         if(sl){sl.max=nz-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nz}`;
         if(pos) pos.textContent=`z=${f.zPos[i]?.toFixed(1)}mm`;
       } else if(axis==='coronal'){
         const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
-        const {data,rows,cols}=doseCoronalSlice(f,i); // rows=nz, cols=nx
+        const {data,rows,cols}=doseCoronalSlice(f,i);
+        S.slices[axis].px={type:'dose', data, dataW:cols, dataH:rows, maxDose:f.maxDose};
         const scaleZ=dZSp/dSp[1];
         renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
           (c,d,w,h)=>renderJet(c,d,w,h,f.maxDose||1));
         if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`;
       } else {
         const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
-        const {data,rows,cols}=doseSagittalSlice(f,i); // rows=nz, cols=ny
+        const {data,rows,cols}=doseSagittalSlice(f,i);
+        S.slices[axis].px={type:'dose', data, dataW:cols, dataH:rows, maxDose:f.maxDose};
         const scaleZ=dZSp/dSp[0];
         renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
           (c,d,w,h)=>renderJet(c,d,w,h,f.maxDose||1));
@@ -950,6 +977,93 @@ function renderMeta(container, f) {
     <h3><span class="dot"></span>Metadaten</h3>
     ${entries.map(([k,v])=>row(k,String(v))).join('')}
   </div></div>`;
+}
+
+// ── Dose Click / Mousemove ────────────────────────────────────────────────────
+function getImagePixel(axis, clientX, clientY) {
+  const cv = document.getElementById(`cv-${axis}`);
+  if (!cv || cv.width === 0) return null;
+  const px = S.slices[axis].px;
+  if (!px) return null;
+
+  // Click position relative to displayed (possibly rotated) canvas
+  const rect = cv.getBoundingClientRect();
+  const dispW = rect.width, dispH = rect.height;
+  let nx = (clientX - rect.left) / dispW;  // 0..1 in display space
+  let ny = (clientY - rect.top)  / dispH;
+
+  // Undo CSS transform: transform = "rotate(rot) scaleX(flipH?-1:1)"
+  // CSS applies scaleX first, then rotate
+  const {rot, flipH} = S.slices[axis];
+  const r = ((rot % 360) + 360) % 360;
+
+  // 1) Undo flip (applied in rotated space)
+  if (flipH) nx = 1 - nx;
+
+  // 2) Undo rotation — convert normalized display coords to normalized image coords
+  let ix, iy;
+  switch(r) {
+    case 0:   ix=nx;   iy=ny;   break;
+    case 90:  ix=ny;   iy=1-nx; break;  // 90° CW: display(nx,ny) → image(ny, 1-nx)
+    case 180: ix=1-nx; iy=1-ny; break;
+    case 270: ix=1-ny; iy=nx;   break;  // 270° CW: display(nx,ny) → image(1-ny, nx)
+    default:  ix=nx;   iy=ny;
+  }
+
+  const imgX = Math.floor(Math.max(0, Math.min(px.dataW-1, ix * px.dataW)));
+  const imgY = Math.floor(Math.max(0, Math.min(px.dataH-1, iy * px.dataH)));
+  const val  = px.data[imgY * px.dataW + imgX];
+  return { imgX, imgY, val, type: px.type, maxDose: px.maxDose };
+}
+
+function showDoseTip(clientX, clientY, result) {
+  if (!result) return;
+  const tip = document.getElementById('doseTip');
+  const val  = document.getElementById('doseTipVal');
+  const lbl  = document.getElementById('doseTipLbl');
+  const psel = document.getElementById('doseTipPos');
+
+  if (result.type === 'dose') {
+    val.textContent  = result.val.toFixed(3) + ' Gy';
+    val.style.color  = 'var(--dose)';
+    lbl.textContent  = `Dosis (${result.val>0 ? ((result.val/result.maxDose)*100).toFixed(1)+'% max' : 'kein Isodose'})`;
+  } else {
+    val.textContent  = Math.round(result.val) + ' HU';
+    val.style.color  = 'var(--ct)';
+    lbl.textContent  = 'Hounsfield Units';
+  }
+  psel.textContent = `Pixel (${result.imgX}, ${result.imgY})`;
+
+  // Position tooltip near cursor, keep inside viewport
+  const margin = 14;
+  let tx = clientX + margin;
+  let ty = clientY + margin;
+  if (tx + 150 > window.innerWidth)  tx = clientX - 155;
+  if (ty + 80  > window.innerHeight) ty = clientY - 85;
+
+  tip.style.left    = tx + 'px';
+  tip.style.top     = ty + 'px';
+  tip.style.display = 'block';
+}
+
+function hideDoseTip() {
+  document.getElementById('doseTip').style.display = 'none';
+}
+
+function onPanelMouseMove(e, axis) {
+  const result = getImagePixel(axis, e.clientX, e.clientY);
+  if (result) showDoseTip(e.clientX, e.clientY, result);
+}
+
+function onPanelClick(e, axis) {
+  // Click pins the tooltip (toggle pin)
+  const result = getImagePixel(axis, e.clientX, e.clientY);
+  if (!result) return;
+  showDoseTip(e.clientX, e.clientY, result);
+  // Add a brief highlight flash
+  const tip = document.getElementById('doseTip');
+  tip.style.borderColor = result.type==='dose' ? 'var(--dose)' : 'var(--ct)';
+  setTimeout(() => tip.style.borderColor = 'var(--accent)', 600);
 }
 
 // ── Rotation & Flip ──────────────────────────────────────────────────────────
