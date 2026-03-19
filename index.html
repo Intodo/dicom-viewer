@@ -59,8 +59,11 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,san
 .sp:last-of-type{border-right:none}
 .sp-lbl{position:absolute;top:5px;left:7px;z-index:10;font-size:10px;font-weight:700;color:rgba(255,255,255,.8);background:rgba(0,0,0,.55);padding:2px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:1px;pointer-events:none}
 .sp-pos{position:absolute;bottom:30px;left:7px;z-index:10;font-size:11px;color:rgba(255,255,255,.55);background:rgba(0,0,0,.5);padding:2px 5px;border-radius:3px;pointer-events:none}
-.sp-wrap{flex:1;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:crosshair}
-.sp-wrap canvas{max-width:100%;max-height:100%;image-rendering:pixelated;display:block}
+.sp-wrap{flex:1;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:crosshair;position:relative}
+.sp-wrap canvas{max-width:100%;max-height:100%;image-rendering:pixelated;display:block;transition:transform .15s}
+.sp-btns{position:absolute;top:5px;right:6px;z-index:20;display:flex;gap:3px}
+.sp-btn{background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);border-radius:4px;padding:2px 5px;font-size:13px;cursor:pointer;line-height:1}
+.sp-btn:hover{background:rgba(88,166,255,.35);border-color:var(--accent)}
 .sp-wrap .sp-loading{color:var(--text2);font-size:12px}
 .sp-scroll{padding:4px 8px;background:var(--surface2);border-top:1px solid var(--border);display:flex;align-items:center;gap:7px}
 .sp-scroll input[type=range]{flex:1;accent-color:var(--accent)}
@@ -161,7 +164,7 @@ const S = {
   wc: 40, ww: 400,
   overlay: false,
   ovlOpacity: 0.6,
-  slices: { axial:{i:0}, coronal:{i:0}, sagittal:{i:0} },
+  slices: { axial:{i:0,rot:0,flipH:false}, coronal:{i:0,rot:0,flipH:false}, sagittal:{i:0,rot:0,flipH:false} },
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -588,7 +591,7 @@ function removeFile(id) {
 
 function setActive(id) {
   S.active = id;
-  S.slices = { axial:{i:0}, coronal:{i:0}, sagittal:{i:0} };
+  S.slices = { axial:{i:0,rot:0,flipH:false}, coronal:{i:0,rot:0,flipH:false}, sagittal:{i:0,rot:0,flipH:false} };
   const f = S.files[id];
   if (f) {
     if (f.modality === 'RTPLAN') S.tab = 'plan';
@@ -618,7 +621,7 @@ function toggleOverlay() {
   S.overlay=!S.overlay;
   const btn=document.getElementById('btnOvl');
   if(btn){btn.textContent=S.overlay?'Overlay ausblenden':'Overlay anzeigen'; btn.classList.toggle('on',S.overlay);}
-  S.slices={axial:{i:0},coronal:{i:0},sagittal:{i:0}};
+  S.slices={axial:{i:0,rot:0,flipH:false},coronal:{i:0,rot:0,flipH:false},sagittal:{i:0,rot:0,flipH:false}};
   renderContent();
 }
 function getOvlIds() {
@@ -714,7 +717,16 @@ function renderImgViewer(container, f) {
     const lbl={axial:'Axial',coronal:'Koronal',sagittal:'Sagittal'}[a];
     return `<div class="sp" id="sp-${a}">
       <div class="sp-lbl">${lbl}</div><div class="sp-pos" id="pos-${a}"></div>
-      <div class="sp-wrap"><canvas id="cv-${a}"></canvas><div id="ld-${a}" class="sp-loading">Lade...</div></div>
+      <div class="sp-wrap">
+        <canvas id="cv-${a}"></canvas>
+        <div id="ld-${a}" class="sp-loading">Lade...</div>
+        <div class="sp-btns">
+          <button class="sp-btn" onclick="rotate('${a}',-90)" title="Links drehen">↺</button>
+          <button class="sp-btn" onclick="rotate('${a}',90)" title="Rechts drehen">↻</button>
+          <button class="sp-btn" onclick="flipH('${a}')" title="Horizontal spiegeln">↔</button>
+          <button class="sp-btn" onclick="resetTransform('${a}')" title="Zurücksetzen">⊙</button>
+        </div>
+      </div>
       <div class="sp-scroll">
         <input type="range" id="sl-${a}" min="0" max="100" value="${S.slices[a].i}" oninput="onSlide('${a}',this.value)">
         <span id="sn-${a}">—</span>
@@ -725,7 +737,7 @@ function renderImgViewer(container, f) {
   const cbHTML=isDose?`<div class="cbwrap"><canvas id="cbCanvas"></canvas></div>`:'';
   container.innerHTML=`<div class="img-viewer"><div class="cbar">${ctrl}</div><div class="panels">${panels}${cbHTML}</div></div>`;
 
-  axes.forEach(a=>drawSlice(a));
+  axes.forEach(a=>{drawSlice(a);applyTransform(a);});
   if(isDose){const cb=document.getElementById('cbCanvas'); if(cb) renderColorbar(cb, f.maxDose||1);}
 }
 
@@ -864,8 +876,8 @@ function drawSlice(axis) {
   }
 }
 
-function onSlide(axis, v) { S.slices[axis].i=parseInt(v); drawSlice(axis); }
-function reloadSlices() { ['axial','coronal','sagittal'].forEach(a=>{ if(document.getElementById(`cv-${a}`)) drawSlice(a); }); }
+function onSlide(axis, v) { S.slices[axis].i=parseInt(v); drawSlice(axis); applyTransform(axis); }
+function reloadSlices() { ['axial','coronal','sagittal'].forEach(a=>{ if(document.getElementById(`cv-${a}`)){drawSlice(a);applyTransform(a);} }); }
 function onW() {
   const wcS=document.getElementById('wcS'),wcI=document.getElementById('wcI');
   const wwS=document.getElementById('wwS'),wwI=document.getElementById('wwI');
@@ -939,6 +951,27 @@ function renderMeta(container, f) {
     ${entries.map(([k,v])=>row(k,String(v))).join('')}
   </div></div>`;
 }
+
+// ── Rotation & Flip ──────────────────────────────────────────────────────────
+function applyTransform(axis) {
+  const cv = document.getElementById(`cv-${axis}`); if(!cv) return;
+  const {rot, flipH} = S.slices[axis];
+  const scaleX = flipH ? -1 : 1;
+  cv.style.transform = `rotate(${rot}deg) scaleX(${scaleX})`;
+}
+function rotate(axis, deg) {
+  S.slices[axis].rot = ((S.slices[axis].rot + deg) % 360 + 360) % 360;
+  applyTransform(axis);
+}
+function flipH(axis) {
+  S.slices[axis].flipH = !S.slices[axis].flipH;
+  applyTransform(axis);
+}
+function resetTransform(axis) {
+  S.slices[axis].rot = 0; S.slices[axis].flipH = false;
+  applyTransform(axis);
+}
+
 
 // ── Drag & Drop ───────────────────────────────────────────────────────────────
 const dz=document.getElementById('dz');
