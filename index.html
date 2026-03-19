@@ -171,7 +171,7 @@ const S = {
   wc: 40, ww: 400,
   overlay: false,
   ovlOpacity: 0.6,
-  slices: { axial:{i:0,rot:0,flipH:false}, coronal:{i:0,rot:0,flipH:false}, sagittal:{i:0,rot:0,flipH:false} },
+  slices: { axial:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0}, coronal:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0}, sagittal:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0} },
   crosshairs: true,
 };
 
@@ -599,7 +599,7 @@ function removeFile(id) {
 
 function setActive(id) {
   S.active = id;
-  S.slices = { axial:{i:0,rot:0,flipH:false}, coronal:{i:0,rot:0,flipH:false}, sagittal:{i:0,rot:0,flipH:false} };
+  S.slices = { axial:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0}, coronal:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0}, sagittal:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0} };
   const f = S.files[id];
   if (f) {
     if (f.modality === 'RTPLAN') S.tab = 'plan';
@@ -629,7 +629,7 @@ function toggleOverlay() {
   S.overlay=!S.overlay;
   const btn=document.getElementById('btnOvl');
   if(btn){btn.textContent=S.overlay?'Overlay ausblenden':'Overlay anzeigen'; btn.classList.toggle('on',S.overlay);}
-  S.slices={axial:{i:0,rot:0,flipH:false},coronal:{i:0,rot:0,flipH:false},sagittal:{i:0,rot:0,flipH:false}};
+  S.slices={axial:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0},coronal:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0},sagittal:{i:0,rot:0,flipH:false,zoom:1,panX:0,panY:0}};
   renderContent();
 }
 function getOvlIds() {
@@ -731,7 +731,10 @@ function renderImgViewer(container, f) {
       <div class="sp-lbl">${lbl}</div><div class="sp-pos" id="pos-${a}"></div>
       <div class="sp-wrap" id="wrap-${a}"
            onmousemove="onPanelMouseMove(event,'${a}')"
-           onmouseleave="hideDoseTip('${a}')">
+           onmouseleave="hideDoseTip('${a}');onPanEnd('${a}')"
+           onmousedown="onPanStart(event,'${a}')"
+           onmouseup="onPanEnd('${a}')"
+           onwheel="onWheelZoom(event,'${a}')">
         <canvas id="cv-${a}"></canvas>
         <div id="ld-${a}" class="sp-loading">Lade...</div>
         <div class="dose-tip" id="tip-${a}">
@@ -740,6 +743,8 @@ function renderImgViewer(container, f) {
           <div class="dose-tip-pos" id="tipPos-${a}"></div>
         </div>
         <div class="sp-btns">
+          <button class="sp-btn" onclick="zoomPanel('${a}',1.25)" title="Zoom +">+</button>
+          <button class="sp-btn" onclick="zoomPanel('${a}',0.8)" title="Zoom −">−</button>
           <button class="sp-btn" onclick="rotate('${a}',-90)" title="Links drehen">↺</button>
           <button class="sp-btn" onclick="rotate('${a}',90)" title="Rechts drehen">↻</button>
           <button class="sp-btn" onclick="flipH('${a}')" title="Horizontal spiegeln">↔</button>
@@ -1058,8 +1063,11 @@ function hideDoseTip(axis) {
 }
 
 function onPanelMouseMove(e, axis) {
-  const result = getImagePixel(axis, e.clientX, e.clientY);
-  showDoseTip(axis, result);
+  onPanMove(e, axis);
+  if(!_drag[axis]?.moved) {
+    const result = getImagePixel(axis, e.clientX, e.clientY);
+    showDoseTip(axis, result);
+  }
 }
 
 function onPanelClick(e, axis) {
@@ -1069,10 +1077,13 @@ function onPanelClick(e, axis) {
 
 // ── Rotation & Flip ──────────────────────────────────────────────────────────
 function applyTransform(axis) {
-  const cv = document.getElementById(`cv-${axis}`); if(!cv) return;
-  const {rot, flipH} = S.slices[axis];
+  const cv = document.getElementById(`cv-${axis}`);
+  const wrap = document.getElementById(`wrap-${axis}`);
+  if(!cv) return;
+  const {rot, flipH, zoom=1, panX=0, panY=0} = S.slices[axis];
   const scaleX = flipH ? -1 : 1;
-  cv.style.transform = `rotate(${rot}deg) scaleX(${scaleX})`;
+  cv.style.transform = `translate(${panX}px,${panY}px) scale(${zoom}) rotate(${rot}deg) scaleX(${scaleX})`;
+  if(wrap) wrap.style.cursor = (_drag[axis]?.active ? 'grabbing' : zoom > 1.01 ? 'grab' : 'crosshair');
 }
 function rotate(axis, deg) {
   S.slices[axis].rot = ((S.slices[axis].rot + deg) % 360 + 360) % 360;
@@ -1083,8 +1094,71 @@ function flipH(axis) {
   applyTransform(axis);
 }
 function resetTransform(axis) {
-  S.slices[axis].rot = 0; S.slices[axis].flipH = false;
+  const sl = S.slices[axis];
+  sl.rot = 0; sl.flipH = false; sl.zoom = 1; sl.panX = 0; sl.panY = 0;
   applyTransform(axis);
+}
+
+// ── Zoom & Pan ───────────────────────────────────────────────────────────────
+const _drag = { axial:{}, coronal:{}, sagittal:{} };
+
+function onWheelZoom(e, axis) {
+  e.preventDefault();
+  const wrap = document.getElementById(`wrap-${axis}`); if(!wrap) return;
+  const sl = S.slices[axis];
+  const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
+  const newZoom = Math.max(0.5, Math.min(16, (sl.zoom||1) * factor));
+  // Zoom toward cursor (relative to wrap center)
+  const wr = wrap.getBoundingClientRect();
+  const cx = e.clientX - wr.left - wr.width/2;
+  const cy = e.clientY - wr.top  - wr.height/2;
+  const oz = sl.zoom||1;
+  sl.panX = cx - (cx - (sl.panX||0)) * newZoom/oz;
+  sl.panY = cy - (cy - (sl.panY||0)) * newZoom/oz;
+  sl.zoom = newZoom;
+  applyTransform(axis);
+}
+
+function zoomPanel(axis, factor) {
+  const sl = S.slices[axis];
+  sl.zoom = Math.max(0.5, Math.min(16, (sl.zoom||1) * factor));
+  // Zoom toward center (no offset adjustment needed)
+  sl.panX = (sl.panX||0) * factor;
+  sl.panY = (sl.panY||0) * factor;
+  applyTransform(axis);
+}
+
+function onPanStart(e, axis) {
+  if(e.button !== 0) return;
+  const sl = S.slices[axis];
+  const cv = document.getElementById(`cv-${axis}`);
+  if(cv) cv.style.transition = 'none';
+  _drag[axis] = { active:true, sx: e.clientX - (sl.panX||0), sy: e.clientY - (sl.panY||0), moved:false };
+  applyTransform(axis);
+}
+
+function onPanMove(e, axis) {
+  const d = _drag[axis];
+  if(d?.active) {
+    const dx = e.clientX - d.sx - (S.slices[axis].panX||0);
+    const dy = e.clientY - d.sy - (S.slices[axis].panY||0);
+    if(Math.abs(dx)+Math.abs(dy) > 2) d.moved = true;
+    if(d.moved) {
+      S.slices[axis].panX = e.clientX - d.sx;
+      S.slices[axis].panY = e.clientY - d.sy;
+      applyTransform(axis);
+    }
+  }
+}
+
+function onPanEnd(axis) {
+  const d = _drag[axis];
+  if(d?.active) {
+    _drag[axis] = {};
+    const cv = document.getElementById(`cv-${axis}`);
+    if(cv) cv.style.transition = '';
+    applyTransform(axis);
+  }
 }
 
 // ── Crosshair Reference Lines ─────────────────────────────────────────────────
