@@ -172,6 +172,7 @@ const S = {
   overlay: false,
   ovlOpacity: 0.6,
   slices: { axial:{i:0,rot:0,flipH:false}, coronal:{i:0,rot:0,flipH:false}, sagittal:{i:0,rot:0,flipH:false} },
+  crosshairs: true,
 };
 
 // ── Utilities ────────────────────────────────────────────────────────────────
@@ -719,6 +720,10 @@ function renderImgViewer(container, f) {
     ctrl=`<div class="cg"><label>Max: <strong style="color:var(--dose)">${f.maxDose?.toFixed(2)||'?'} Gy</strong></label></div>
       <div class="cg"><label>${f.units||'GY'} &bull; ${f.summationType||'—'}</label></div>`;
   }
+  if(has3D){
+    const chOn=S.crosshairs;
+    ctrl+=`<div class="csep"></div><button id="btnCH" onclick="toggleCrosshairs()" title="Referenzlinien ein/aus" style="background:${chOn?'rgba(88,166,255,.25)':'transparent'};border:1px solid ${chOn?'var(--accent)':'var(--border)'};color:${chOn?'var(--text)':'var(--text2)'};border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0">✛ Fadenkreuz</button>`;
+  }
 
   const panels=axes.map(a=>{
     const lbl={axial:'Axial',coronal:'Koronal',sagittal:'Sagittal'}[a];
@@ -808,7 +813,8 @@ function drawSlice(axis) {
         const scaleZ=series.zSpacing/ctSp[1];
         const dispH=Math.round(h*scaleZ);
         renderScaled(cv, null, w, h, w, dispH, (c)=>renderOverlay(c,ctSlice,doseSlice,w,h,S.wc,S.ww,S.ovlOpacity,0.05,doseF.maxDose||1));
-        if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`; return;
+        if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`;
+        if(S.crosshairs) _drawCrosshairLines(axis); return;
       } else {
         const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
         const ct=series.sagittalSlice(i); w=ct.cols; h=ct.rows; // w=ny, h=nz
@@ -831,7 +837,8 @@ function drawSlice(axis) {
         const scaleZ=series.zSpacing/ctSp[0];
         const dispH=Math.round(h*scaleZ);
         renderScaled(cv, null, w, h, w, dispH, (c)=>renderOverlay(c,ctSlice,doseSlice,w,h,S.wc,S.ww,S.ovlOpacity,0.05,doseF.maxDose||1));
-        if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`; return;
+        if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`;
+        if(S.crosshairs) _drawCrosshairLines(axis); return;
       }
       // store for click lookup (axial only — coronal/sagittal return early above)
       S.slices[axis].px = {type:'dose', data: doseSlice, dataW:w, dataH:h, maxDose:doseF.maxDose};
@@ -896,13 +903,22 @@ function drawSlice(axis) {
         if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`;
       }
     }
+    if(S.crosshairs) _drawCrosshairLines(axis);
   } catch(e) {
     if(ld){ld.style.display='block'; ld.textContent='Fehler: '+e.message;}
     console.error(e);
   }
 }
 
-function onSlide(axis, v) { S.slices[axis].i=parseInt(v); drawSlice(axis); applyTransform(axis); }
+function onSlide(axis, v) {
+  S.slices[axis].i=parseInt(v);
+  drawSlice(axis); applyTransform(axis);
+  if(S.crosshairs){
+    ['axial','coronal','sagittal'].filter(a=>a!==axis).forEach(a=>{
+      if(document.getElementById(`cv-${a}`)){drawSlice(a);applyTransform(a);}
+    });
+  }
+}
 function reloadSlices() { ['axial','coronal','sagittal'].forEach(a=>{ if(document.getElementById(`cv-${a}`)){drawSlice(a);applyTransform(a);} }); }
 function onW() {
   const wcS=document.getElementById('wcS'),wcI=document.getElementById('wcI');
@@ -1069,6 +1085,49 @@ function flipH(axis) {
 function resetTransform(axis) {
   S.slices[axis].rot = 0; S.slices[axis].flipH = false;
   applyTransform(axis);
+}
+
+// ── Crosshair Reference Lines ─────────────────────────────────────────────────
+function toggleCrosshairs() {
+  S.crosshairs = !S.crosshairs;
+  const btn = document.getElementById('btnCH');
+  if(btn){
+    btn.style.background = S.crosshairs ? 'rgba(88,166,255,.25)' : 'transparent';
+    btn.style.borderColor = S.crosshairs ? 'var(--accent)' : 'var(--border)';
+    btn.style.color = S.crosshairs ? 'var(--text)' : 'var(--text2)';
+  }
+  reloadSlices();
+}
+
+function _drawCrosshairLines(axis) {
+  const cv = document.getElementById(`cv-${axis}`); if(!cv||!cv.width||!cv.height) return;
+  const f = S.files[S.active]; if(!f) return;
+  const mod = f.modality; const isOvl = S.overlay && mod==='RTDOSE';
+  let nz, ny, nx;
+  if(mod==='CT' && f.series){ nz=f.series.nz; ny=f.series.ny; nx=f.series.nx; }
+  else if(isOvl){ const ids=getOvlIds(); if(!ids) return; const s=S.files[ids.ctId]?.series; if(!s) return; nz=s.nz; ny=s.ny; nx=s.nx; }
+  else if(mod==='RTDOSE'){ nz=f.numFrames; ny=f.rows; nx=f.cols; }
+  else return;
+  const ctx = cv.getContext('2d');
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5,4]);
+  const W=cv.width, H=cv.height;
+  const ai=S.slices.axial.i, ci=S.slices.coronal.i, si=S.slices.sagittal.i;
+  const drawLine = (color, x1,y1,x2,y2) => {
+    ctx.strokeStyle=color; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  };
+  if(axis==='axial'){
+    drawLine('rgba(0,230,118,0.85)', 0, ci/ny*H, W, ci/ny*H);   // coronal  = green horizontal
+    drawLine('rgba(255,145,0,0.85)',  si/nx*W, 0, si/nx*W, H);  // sagittal = orange vertical
+  } else if(axis==='coronal'){
+    drawLine('rgba(255,215,0,0.85)', 0, ai/nz*H, W, ai/nz*H);  // axial    = yellow horizontal
+    drawLine('rgba(255,145,0,0.85)', si/nx*W, 0, si/nx*W, H);  // sagittal = orange vertical
+  } else {
+    drawLine('rgba(255,215,0,0.85)', 0, ai/nz*H, W, ai/nz*H);  // axial    = yellow horizontal
+    drawLine('rgba(0,230,118,0.85)', ci/ny*W, 0, ci/ny*W, H);  // coronal  = green vertical
+  }
+  ctx.restore();
 }
 
 
