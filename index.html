@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DICOM Viewer — Radioonkologie</title>
+<style>
+:root{--bg:#0d1117;--surface:#161b22;--surface2:#21262d;--border:#30363d;--accent:#58a6ff;--accent2:#3fb950;--warn:#f78166;--text:#e6edf3;--text2:#8b949e;--dose:#ff6b35;--ct:#79c0ff;--plan:#7ee787;--struct:#d2a8ff}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.header{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.header h1{font-size:17px;font-weight:600}.header h1 span{color:var(--accent)}
+.hright{margin-left:auto;display:flex;gap:10px;align-items:center;font-size:11px;color:var(--text2)}
+.layout{display:flex;flex:1;overflow:hidden}
+.sidebar{width:270px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0}
+.sb-hdr{padding:8px 12px;border-bottom:1px solid var(--border);font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.file-list{flex:1;overflow-y:auto}
+.file-item{padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;position:relative}
+.file-item:hover{background:var(--surface2)}.file-item.active{background:rgba(88,166,255,.1);border-left:2px solid var(--accent)}
+.mbadge{display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;margin-bottom:3px}
+.mod-CT{background:rgba(121,192,255,.2);color:var(--ct)}.mod-RTDOSE{background:rgba(255,107,53,.2);color:var(--dose)}
+.mod-RTPLAN{background:rgba(126,231,135,.2);color:var(--plan)}.mod-RTSTRUCT{background:rgba(210,168,255,.2);color:var(--struct)}
+.fpatient{font-size:12px;font-weight:500}.fdesc{font-size:11px;color:var(--text2)}
+.fremove{position:absolute;right:8px;top:8px;background:none;border:none;color:var(--text2);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:3px}
+.fremove:hover{background:rgba(247,129,102,.2);color:var(--warn)}
+.empty-hint{padding:20px 12px;color:var(--text2);font-size:12px;text-align:center;line-height:1.6}
+.dropzone{margin:10px 12px;border:2px dashed var(--border);border-radius:8px;padding:14px 10px;text-align:center;cursor:pointer;transition:all .2s;color:var(--text2);font-size:12px}
+.dropzone:hover,.dropzone.dragover{border-color:var(--accent);background:rgba(88,166,255,.05);color:var(--accent)}
+.dropzone .dz-icon{font-size:26px;margin-bottom:4px}.dropzone input{display:none}
+.btn-open{display:block;margin-top:6px;background:var(--accent);color:#000;border:none;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer}
+.ovl-panel{margin:6px 10px;background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.25);border-radius:8px;padding:10px 12px}
+.ovl-title{font-size:11px;font-weight:700;color:var(--accent);margin-bottom:8px}
+.ovl-row{margin-bottom:6px}.ovl-row label{font-size:10px;color:var(--text2);display:block;margin-bottom:2px}
+.ovl-row select{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:4px 6px;font-size:11px}
+.ovl-opacity{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.ovl-opacity label{font-size:10px;color:var(--text2);white-space:nowrap}
+.ovl-opacity input{flex:1;accent-color:var(--accent)}.ovl-opacity span{font-size:11px;color:var(--text2);width:30px}
+.btn-ovl{width:100%;background:var(--accent);color:#000;border:none;border-radius:5px;padding:6px;font-size:12px;font-weight:700;cursor:pointer}
+.btn-ovl.on{background:var(--accent2)}
+.content{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.no-file{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text2);gap:12px}
+.no-file .big{font-size:56px;opacity:.25}
+.vp{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.pbar{background:var(--surface);border-bottom:1px solid var(--border);padding:7px 16px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;flex-shrink:0}
+.ic{display:flex;flex-direction:column}.ic-lbl{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}.ic-val{font-size:12px;font-weight:500}
+.tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{padding:8px 16px;cursor:pointer;color:var(--text2);font-size:13px;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:var(--text);background:var(--surface2)}.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.img-viewer{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.cbar{background:var(--surface2);border-bottom:1px solid var(--border);padding:7px 14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;flex-shrink:0}
+.cg{display:flex;align-items:center;gap:7px}
+.cg label{font-size:11px;color:var(--text2);white-space:nowrap}
+.cg input[type=range]{width:90px;accent-color:var(--accent)}
+.cg input[type=number]{width:62px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 5px;font-size:12px}
+.cg select{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 5px;font-size:12px}
+.csep{width:1px;height:18px;background:var(--border)}
+.panels{flex:1;display:flex;overflow:hidden}
+.sp{flex:1;display:flex;flex-direction:column;border-right:1px solid var(--border);min-width:0;position:relative}
+.sp:last-of-type{border-right:none}
+.sp-lbl{position:absolute;top:5px;left:7px;z-index:10;font-size:10px;font-weight:700;color:rgba(255,255,255,.8);background:rgba(0,0,0,.55);padding:2px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:1px;pointer-events:none}
+.sp-pos{position:absolute;bottom:30px;left:7px;z-index:10;font-size:11px;color:rgba(255,255,255,.55);background:rgba(0,0,0,.5);padding:2px 5px;border-radius:3px;pointer-events:none}
+.sp-wrap{flex:1;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:crosshair}
+.sp-wrap canvas{max-width:100%;max-height:100%;image-rendering:pixelated;display:block}
+.sp-wrap .sp-loading{color:var(--text2);font-size:12px}
+.sp-scroll{padding:4px 8px;background:var(--surface2);border-top:1px solid var(--border);display:flex;align-items:center;gap:7px}
+.sp-scroll input[type=range]{flex:1;accent-color:var(--accent)}
+.sp-scroll span{font-size:11px;color:var(--text2);white-space:nowrap;min-width:52px;text-align:right}
+.cbwrap{width:62px;display:flex;align-items:center;justify-content:center;background:#000;border-left:1px solid var(--border);flex-shrink:0}
+.cbwrap canvas{width:52px}
+.plan-view{flex:1;overflow-y:auto;padding:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:10px;margin-bottom:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:11px 13px}
+.card h3{font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px;display:flex;align-items:center;gap:5px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--accent2)}
+.pr{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)}
+.pr:last-child{border-bottom:none}.pr .k{color:var(--text2);font-size:12px}.pr .v{color:var(--text);font-size:12px;font-weight:500;text-align:right;max-width:155px;word-break:break-word}
+.btbl{width:100%;border-collapse:collapse;font-size:12px}
+.btbl th{background:var(--surface2);color:var(--text2);font-weight:600;text-align:left;padding:5px 9px;border-bottom:1px solid var(--border)}
+.btbl td{padding:5px 9px;border-bottom:1px solid var(--border)}
+.btbl tr:hover td{background:var(--surface2)}
+.bTREATMENT{color:var(--plan)}.bSETUP{color:var(--text2)}.bDYNAMIC{color:var(--accent)}
+.sec{font-size:13px;font-weight:700;margin:14px 0 7px;display:flex;align-items:center;gap:8px}
+.sec::after{content:'';flex:1;height:1px;background:var(--border)}
+.rgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px}
+.ritem{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 9px;display:flex;align-items:center;gap:7px}
+.rcolor{width:13px;height:13px;border-radius:3px;flex-shrink:0}
+.rname{font-size:12px;font-weight:500}.rnum{font-size:10px;color:var(--text2)}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(88,166,255,.3);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toasts{position:fixed;top:14px;right:14px;z-index:1000;display:flex;flex-direction:column;gap:5px}
+.toast{padding:7px 12px;border-radius:6px;font-size:12px;font-weight:500;animation:tin .2s ease}
+.tok{background:rgba(63,185,80,.15);border:1px solid rgba(63,185,80,.4);color:var(--accent2)}
+.terr{background:rgba(247,129,102,.15);border:1px solid rgba(247,129,102,.4);color:var(--warn)}
+@keyframes tin{from{transform:translateX(16px);opacity:0}}
+::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.prog-bar{height:3px;background:var(--accent);transition:width .3s;border-radius:2px}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#58a6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+  <h1>DICOM <span>Viewer</span></h1>
+  <div class="hright">
+    <span id="loadSpin" style="display:none"><span class="spinner"></span></span>
+    <span>Radioonkologie &bull; Lokal &amp; Privat</span>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="sidebar">
+    <div class="dropzone" id="dz">
+      <div class="dz-icon">📂</div>
+      <div>DICOM Dateien hier ablegen</div>
+      <div style="font-size:10px;margin-top:2px">CT · RT Dose · RT Plan · RT Struct</div>
+      <button class="btn-open" onclick="document.getElementById('fi').click()">Dateien öffnen</button>
+      <input type="file" id="fi" multiple accept=".dcm">
+    </div>
+
+    <div class="ovl-panel" id="ovlPanel" style="display:none">
+      <div class="ovl-title">🔀 CT + Dosis Overlay</div>
+      <div class="ovl-row"><label>CT Serie</label><select id="ovlCT"></select></div>
+      <div class="ovl-row"><label>RT Dose</label><select id="ovlDose"></select></div>
+      <div class="ovl-opacity">
+        <label>Opacity</label>
+        <input type="range" id="ovlOp" min="10" max="90" value="60" oninput="ovlOpChange(this.value)">
+        <span id="ovlOpVal">60%</span>
+      </div>
+      <button class="btn-ovl" id="btnOvl" onclick="toggleOverlay()">Overlay anzeigen</button>
+    </div>
+
+    <div class="sb-hdr">Geladene Dateien</div>
+    <div class="file-list" id="fileList">
+      <div class="empty-hint">Keine Dateien geladen.<br>DCM-Dateien per Drag &amp; Drop hinzufügen.<br><br>⚠️ Alle Daten bleiben lokal im Browser.</div>
+    </div>
+  </div>
+
+  <div class="content" id="content">
+    <div class="no-file">
+      <div class="big">🏥</div>
+      <div style="font-size:16px;color:var(--text);font-weight:500">DICOM Viewer</div>
+      <div style="font-size:12px;max-width:300px;text-align:center;line-height:1.6;color:var(--text2)">
+        DICOM-Dateien per Drag &amp; Drop laden.<br>
+        CT · RT Dose · RT Plan · RT Struct<br><br>
+        <strong style="color:var(--accent2)">🔒 Alle Daten bleiben lokal — kein Upload, kein Server.</strong>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="toasts" id="toasts"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/dicom-parser@1.8.21/dist/dicomParser.min.js"></script>
+<script>
+'use strict';
+
+// ── State ───────────────────────────────────────────────────────────────────
+const S = {
+  files: {},          // id -> parsed file object
+  active: null,
+  tab: 'viewer',
+  wc: 40, ww: 400,
+  overlay: false,
+  ovlOpacity: 0.6,
+  slices: { axial:{i:0}, coronal:{i:0}, sagittal:{i:0} },
+};
+
+// ── Utilities ────────────────────────────────────────────────────────────────
+let toastTimer = {};
+function toast(msg, type='ok', dur=3000) {
+  const el = document.createElement('div');
+  el.className = `toast t${type}`; el.textContent = msg;
+  // map type to class
+  el.className = `toast ${type === 'ok' ? 'tok' : 'terr'}`;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), dur);
+}
+function loading(on) { document.getElementById('loadSpin').style.display = on ? 'flex' : 'none'; }
+function uid() { return Math.random().toString(36).slice(2); }
+function fmtName(n) { return n ? String(n).replace(/\^/g,' ').trim() : '—'; }
+function fmtDate(d) { if(!d||d.length<8) return d||'—'; return `${d.slice(6,8)}.${d.slice(4,6)}.${d.slice(0,4)}`; }
+function modLabel(m) { return {CT:'CT',RTDOSE:'RT Dose',RTPLAN:'RT Plan',RTSTRUCT:'RT Struct'}[m]||m; }
+
+// ── Jet Colormap ─────────────────────────────────────────────────────────────
+function jet(t) {
+  const r = Math.min(1, Math.max(0, 1.5 - Math.abs(4*t - 3)));
+  const g = Math.min(1, Math.max(0, 1.5 - Math.abs(4*t - 2)));
+  const b = Math.min(1, Math.max(0, 1.5 - Math.abs(4*t - 1)));
+  return [r*255|0, g*255|0, b*255|0];
+}
+
+// ── DICOM Helpers ─────────────────────────────────────────────────────────────
+function ds_str(ds, tag) { try { return ds.string(tag); } catch(e) { return null; } }
+function ds_float(ds, tag, def=0) { const v = ds_str(ds, tag); return v ? parseFloat(v) : def; }
+function ds_int(ds, tag, def=0) { try { return ds.uint16(tag) ?? def; } catch(e) { return def; } }
+function ds_floatArr(ds, tag) {
+  const v = ds_str(ds, tag);
+  return v ? v.split('\\').map(parseFloat) : null;
+}
+function ds_intArr(ds, tag) {
+  const v = ds_str(ds, tag);
+  return v ? v.split('\\').map(parseInt) : null;
+}
+function ds_seqItems(ds, tag) {
+  try {
+    const el = ds.elements[tag];
+    return el && el.items ? el.items : [];
+  } catch(e) { return []; }
+}
+
+// Aligned typed array from DICOM pixel element
+function getTypedPixels(ds, bitsAlloc, pixRep, count) {
+  const el = ds.elements.x7fe00010;
+  const off = el.dataOffset;
+  if (bitsAlloc === 32) {
+    if (off % 4 === 0) return new Uint32Array(ds.byteArray.buffer, off, count);
+    const b = new Uint8Array(count*4); b.set(ds.byteArray.subarray(off, off+count*4)); return new Uint32Array(b.buffer);
+  } else if (bitsAlloc === 16) {
+    if (off % 2 === 0) return pixRep ? new Int16Array(ds.byteArray.buffer, off, count) : new Uint16Array(ds.byteArray.buffer, off, count);
+    const b = new Uint8Array(count*2); b.set(ds.byteArray.subarray(off, off+count*2));
+    return pixRep ? new Int16Array(b.buffer) : new Uint16Array(b.buffer);
+  } else {
+    return ds.byteArray.subarray(off, off + count);
+  }
+}
+
+// ── DICOM Parse ───────────────────────────────────────────────────────────────
+function parseDicomFile(buffer, filename) {
+  const ba = new Uint8Array(buffer);
+  const ds = dicomParser.parseDicom(ba);
+  const modality = ds_str(ds, 'x00080060') || 'UNKNOWN';
+
+  const base = {
+    patientName: ds_str(ds, 'x00100010'),
+    patientID:   ds_str(ds, 'x00100020'),
+    studyDate:   ds_str(ds, 'x00080020'),
+    studyDesc:   ds_str(ds, 'x00081030'),
+    seriesDesc:  ds_str(ds, 'x0008103e'),
+    institution: ds_str(ds, 'x00080080'),
+    modality,
+    seriesUID:   ds_str(ds, 'x0020000e'),
+    filename,
+  };
+
+  if (modality === 'CT') {
+    const rows = ds_int(ds, 'x00280010'); const cols = ds_int(ds, 'x00280011');
+    const bitsAlloc = ds_int(ds, 'x00280100', 16);
+    const pixRep = ds_int(ds, 'x00280103', 0);
+    const slope = ds_float(ds, 'x00281053', 1);
+    const intercept = ds_float(ds, 'x00281052', 0);
+    const spacing = ds_floatArr(ds, 'x00280030') || [1,1];
+    const ipp = ds_floatArr(ds, 'x00200032') || [0,0,0];
+    let wc = ds_float(ds, 'x00281050', 40); let ww = ds_float(ds, 'x00281051', 400);
+    // Multi-value WC/WW: take first
+    const wcStr = ds_str(ds, 'x00281050'); if(wcStr && wcStr.includes('\\')) wc = parseFloat(wcStr.split('\\')[0]);
+    const wwStr = ds_str(ds, 'x00281051'); if(wwStr && wwStr.includes('\\')) ww = parseFloat(wwStr.split('\\')[0]);
+    const raw = getTypedPixels(ds, bitsAlloc, pixRep, rows*cols);
+    const hu = new Float32Array(rows*cols);
+    for (let i=0; i<rows*cols; i++) hu[i] = raw[i]*slope + intercept;
+    return { ...base, rows, cols, spacing, ipp, wc, ww, hu, z: ipp[2] };
+  }
+
+  if (modality === 'RTDOSE') {
+    const rows = ds_int(ds, 'x00280010'); const cols = ds_int(ds, 'x00280011');
+    const numFrames = parseInt(ds_str(ds, 'x00280008') || '1');
+    const bitsAlloc = ds_int(ds, 'x00280100', 32);
+    const scaling = ds_float(ds, 'x3004000e', 1);
+    const raw = getTypedPixels(ds, bitsAlloc, 0, numFrames*rows*cols);
+    const gy = new Float32Array(numFrames*rows*cols);
+    for (let i=0; i<gy.length; i++) gy[i] = raw[i]*scaling;
+    const ipp = ds_floatArr(ds, 'x00200032') || [0,0,0];
+    const spacing = ds_floatArr(ds, 'x00280030') || [1,1];
+    const zOffsets = ds_floatArr(ds, 'x3004000c') || Array.from({length:numFrames},(_,i)=>i);
+    const zPos = zOffsets.map(o => ipp[2]+o);
+    let maxDose = 0; for (let i=0; i<gy.length; i++) if(gy[i]>maxDose) maxDose=gy[i];
+    return { ...base, rows, cols, numFrames, gy, ipp, spacing, zPos, maxDose,
+      units: ds_str(ds, 'x30040002')||'GY', summationType: ds_str(ds, 'x30040004')||'' };
+  }
+
+  if (modality === 'RTPLAN') {
+    const beams = [];
+    for (const item of ds_seqItems(ds, 'x300a00b0')) {
+      const bds = item.dataSet;
+      const cp0ds = ds_seqItems(bds, 'x300a0111')[0]?.dataSet;
+      let cp0 = null;
+      if (cp0ds) {
+        cp0 = {
+          gantryAngle: ds_float(cp0ds, 'x300a011e'),
+          collimatorAngle: ds_float(cp0ds, 'x300a0120'),
+          couchAngle: ds_float(cp0ds, 'x300a0122'),
+          isocenter: ds_floatArr(cp0ds, 'x300a012c'),
+          energy: ds_float(cp0ds, 'x300a0114'),
+        };
+        for (const bld of ds_seqItems(cp0ds, 'x300a011a')) {
+          const blds = bld.dataSet;
+          const dtype = ds_str(blds, 'x300a00b8');
+          const pos = ds_floatArr(blds, 'x300a011c');
+          if (dtype==='ASYMX'||dtype==='X') cp0.jawX = pos;
+          if (dtype==='ASYMY'||dtype==='Y') cp0.jawY = pos;
+        }
+      }
+      beams.push({
+        num: ds_str(bds, 'x300a00c0'), name: ds_str(bds, 'x300a00c2'),
+        type: ds_str(bds, 'x300a00c4'), radType: ds_str(bds, 'x300a00c6'),
+        delivery: ds_str(bds, 'x300a00ce'), nCP: ds_str(bds, 'x300a0110'),
+        machine: ds_str(bds, 'x300a016c'), cp0,
+      });
+    }
+    const fractionGroups = [];
+    for (const item of ds_seqItems(ds, 'x300a0070')) {
+      const fds = item.dataSet;
+      const beamDoses = ds_seqItems(fds, 'x300a0111').map(rb => ({  // Note: referencedBeam
+        beamNum: ds_str(rb.dataSet, 'x300c0006'),
+        meterset: ds_str(rb.dataSet, 'x300a0086'),
+        dose: ds_str(rb.dataSet, 'x300a0084'),
+      }));
+      fractionGroups.push({
+        num: ds_str(fds, 'x300a0071'), fractions: ds_str(fds, 'x300a0078'),
+        numBeams: ds_str(fds, 'x300a0080'), beamDoses,
+      });
+    }
+    // Fix: referenced beam sequence tag is x300c0004
+    const fractionGroups2 = [];
+    for (const item of ds_seqItems(ds, 'x300a0070')) {
+      const fds = item.dataSet;
+      const refBeams = ds_seqItems(fds, 'x300c0004').map(rb => ({
+        beamNum: ds_str(rb.dataSet, 'x300c0006'),
+        meterset: ds_str(rb.dataSet, 'x300a0086'),
+        dose: ds_str(rb.dataSet, 'x300a0084'),
+      }));
+      fractionGroups2.push({
+        num: ds_str(fds, 'x300a0071'), fractions: ds_str(fds, 'x300a0078'),
+        numBeams: ds_str(fds, 'x300a0080'), beamDoses: refBeams,
+      });
+    }
+    return { ...base,
+      planLabel: ds_str(ds, 'x300a0002'), planName: ds_str(ds, 'x300a0003'),
+      planDate: ds_str(ds, 'x300a0006'), planGeometry: ds_str(ds, 'x300a000c'),
+      beams, fractionGroups: fractionGroups2,
+    };
+  }
+
+  if (modality === 'RTSTRUCT') {
+    const rois = ds_seqItems(ds, 'x30060020').map(item => ({
+      num: ds_str(item.dataSet, 'x30060022'),
+      name: ds_str(item.dataSet, 'x30060026'),
+      desc: ds_str(item.dataSet, 'x30060028'),
+    }));
+    const colors = {};
+    for (const item of ds_seqItems(ds, 'x30060039')) {
+      const num = ds_str(item.dataSet, 'x30060084');
+      const col = ds_floatArr(item.dataSet, 'x3006002a');
+      if (num && col) colors[num] = col;
+    }
+    rois.forEach(r => r.color = colors[r.num] || [128,128,128]);
+    return { ...base, rois, structLabel: ds_str(ds, 'x30060002') };
+  }
+
+  return base;
+}
+
+// ── CT Series ────────────────────────────────────────────────────────────────
+class CTSeries {
+  constructor(slices) {
+    // slices: array of parsed CT file objects, sorted by z
+    this.slices = slices.slice().sort((a,b) => a.z - b.z);
+    this.nz = slices.length;
+    this.ny = slices[0].rows;
+    this.nx = slices[0].cols;
+    this.spacing = slices[0].spacing;
+    this.ipp = slices[0].ipp;
+    this.wc = slices[0].wc; this.ww = slices[0].ww;
+    this._volume = null;
+  }
+  buildVolume() {
+    if (this._volume) return;
+    const {nz,ny,nx} = this;
+    this._volume = new Float32Array(nz*ny*nx);
+    for (let z=0; z<nz; z++) this._volume.set(this.slices[z].hu, z*ny*nx);
+  }
+  axialSlice(z) { return this.slices[z].hu; }
+  coronalSlice(y) {
+    this.buildVolume();
+    const {nz,ny,nx,_volume} = this;
+    const out = new Float32Array(nz*nx);
+    for (let z=0; z<nz; z++) for (let x=0; x<nx; x++) out[z*nx+x] = _volume[z*ny*nx+y*nx+x];
+    return { data:out, rows:nz, cols:nx };
+  }
+  sagittalSlice(x) {
+    this.buildVolume();
+    const {nz,ny,nx,_volume} = this;
+    const out = new Float32Array(nz*ny);
+    for (let z=0; z<nz; z++) for (let y=0; y<ny; y++) out[z*ny+y] = _volume[z*ny*nx+y*nx+x];
+    return { data:out, rows:nz, cols:ny };
+  }
+}
+
+// ── RT Dose helpers ───────────────────────────────────────────────────────────
+function doseAxialSlice(dose, z) {
+  return dose.gy.subarray(z*dose.rows*dose.cols, (z+1)*dose.rows*dose.cols);
+}
+function doseCoronalSlice(dose, y) {
+  const {numFrames:nz, rows:ny, cols:nx, gy} = dose;
+  const out = new Float32Array(nz*nx);
+  for (let z=0; z<nz; z++) for (let x=0; x<nx; x++) out[z*nx+x] = gy[z*ny*nx+y*nx+x];
+  return { data:out, rows:nz, cols:nx };
+}
+function doseSagittalSlice(dose, x) {
+  const {numFrames:nz, rows:ny, cols:nx, gy} = dose;
+  const out = new Float32Array(nz*ny);
+  for (let z=0; z<nz; z++) for (let y=0; y<ny; y++) out[z*ny+y] = gy[z*ny*nx+y*nx+x];
+  return { data:out, rows:nz, cols:ny };
+}
+function doseAtZ(dose, targetZ) {
+  const zp = dose.zPos;
+  if (targetZ <= zp[0]) return doseAxialSlice(dose, 0);
+  if (targetZ >= zp[zp.length-1]) return doseAxialSlice(dose, zp.length-1);
+  let i=0; while(i<zp.length-1 && zp[i+1]<=targetZ) i++;
+  const t = (targetZ - zp[i]) / (zp[i+1] - zp[i]);
+  const f0 = doseAxialSlice(dose, i); const f1 = doseAxialSlice(dose, i+1);
+  const out = new Float32Array(dose.rows*dose.cols);
+  for (let j=0; j<out.length; j++) out[j] = f0[j]*(1-t) + f1[j]*t;
+  return out;
+}
+
+// ── Spatial resampling for overlay ───────────────────────────────────────────
+function resampleDoseOnCT(dose, ctSlice, ctZ) {
+  const doseFrame = doseAtZ(dose, ctZ);
+  const {rows:ctR, cols:ctC, ipp:ctIPP, spacing:ctSp} = ctSlice;
+  const {rows:dR, cols:dC, ipp:dIPP, spacing:dSp} = dose;
+  const out = new Float32Array(ctR*ctC);
+  for (let r=0; r<ctR; r++) {
+    const wy = ctIPP[1] + r*ctSp[0];
+    const dr = (wy - dIPP[1]) / dSp[0];
+    const r0 = Math.max(0,Math.min(dR-1, dr|0));
+    const r1 = Math.min(dR-1, r0+1);
+    const fdr = dr - (dr|0);
+    for (let c=0; c<ctC; c++) {
+      const wx = ctIPP[0] + c*ctSp[1];
+      const dc = (wx - dIPP[0]) / dSp[1];
+      const c0 = Math.max(0,Math.min(dC-1, dc|0));
+      const c1 = Math.min(dC-1, c0+1);
+      const fdc = dc - (dc|0);
+      out[r*ctC+c] = doseFrame[r0*dC+c0]*(1-fdr)*(1-fdc) + doseFrame[r0*dC+c1]*(1-fdr)*fdc
+                   + doseFrame[r1*dC+c0]*fdr*(1-fdc)      + doseFrame[r1*dC+c1]*fdr*fdc;
+    }
+  }
+  return out;
+}
+
+// ── Canvas Rendering ──────────────────────────────────────────────────────────
+function renderGray(canvas, data, width, height, wc, ww) {
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(width, height);
+  const lo = wc - ww/2, hi = wc + ww/2;
+  for (let i=0; i<width*height; i++) {
+    const v = ((data[i]-lo)/ww*255)|0;
+    const g = v<0?0:v>255?255:v;
+    img.data[i*4]=img.data[i*4+1]=img.data[i*4+2]=g; img.data[i*4+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function renderJet(canvas, data, width, height, maxVal) {
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(width, height);
+  for (let i=0; i<width*height; i++) {
+    const [r,g,b] = jet(Math.max(0,Math.min(1, data[i]/maxVal)));
+    img.data[i*4]=r; img.data[i*4+1]=g; img.data[i*4+2]=b; img.data[i*4+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function renderOverlay(canvas, ctData, doseData, width, height, wc, ww, opacity, threshold, maxDose) {
+  canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(width, height);
+  const lo = wc - ww/2;
+  for (let i=0; i<width*height; i++) {
+    const ctNorm = Math.max(0,Math.min(1,(ctData[i]-lo)/ww));
+    const g = ctNorm*255;
+    const doseNorm = doseData[i] / maxDose;
+    if (doseNorm > threshold) {
+      const a = opacity;
+      const [dr,dg,db] = jet(Math.max(0,Math.min(1,doseNorm)));
+      img.data[i*4]   = g*(1-a) + dr*a |0;
+      img.data[i*4+1] = g*(1-a) + dg*a |0;
+      img.data[i*4+2] = g*(1-a) + db*a |0;
+    } else {
+      img.data[i*4]=img.data[i*4+1]=img.data[i*4+2]=g|0;
+    }
+    img.data[i*4+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function renderColorbar(canvas, maxDose) {
+  canvas.width = 52; canvas.height = 220;
+  const ctx = canvas.getContext('2d');
+  for (let y=0; y<200; y++) {
+    const t = 1 - y/200;
+    const [r,g,b] = jet(t);
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, y, 26, 1);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.font = '9px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(maxDose.toFixed(1), 28, 5);
+  ctx.fillText((maxDose/2).toFixed(1), 28, 103);
+  ctx.fillText('0', 28, 202);
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.font = '8px sans-serif'; ctx.fillText('Gy', 28, 215);
+}
+
+// ── File management ───────────────────────────────────────────────────────────
+async function loadFiles(fileList) {
+  if (!fileList.length) return;
+  loading(true);
+  const ctGroups = {};
+  const others = [];
+
+  for (const f of fileList) {
+    try {
+      const buf = await f.arrayBuffer();
+      const parsed = parseDicomFile(buf, f.name);
+      if (parsed.modality === 'CT') {
+        const suid = parsed.seriesUID || 'default';
+        if (!ctGroups[suid]) ctGroups[suid] = [];
+        ctGroups[suid].push(parsed);
+      } else {
+        others.push(parsed);
+      }
+    } catch(e) { toast(`Fehler: ${f.name}: ${e.message}`, 'err', 5000); }
+  }
+
+  // Group CT slices into series
+  for (const [suid, slices] of Object.entries(ctGroups)) {
+    const id = uid();
+    const series = new CTSeries(slices);
+    const first = series.slices[0];
+    S.files[id] = {
+      id, modality:'CT', series,
+      patientName: first.patientName, patientID: first.patientID,
+      studyDate: first.studyDate, studyDesc: first.studyDesc,
+      seriesDesc: first.seriesDesc, institution: first.institution,
+      numSlices: series.nz, wc: first.wc, ww: first.ww,
+      filename: `CT Serie (${series.nz} Schichten)`,
+    };
+    if (!S.active) { S.active = id; S.wc = first.wc; S.ww = first.ww; }
+  }
+
+  for (const p of others) {
+    const id = uid();
+    S.files[id] = { id, ...p };
+    if (!S.active) S.active = id;
+  }
+
+  loading(false);
+  renderFileList();
+  renderContent();
+  updateOvlPanel();
+  const n = Object.keys(ctGroups).length + others.length;
+  if (n) toast(`${n} Datei(en) geladen`);
+}
+
+function removeFile(id) {
+  delete S.files[id];
+  if (S.active === id) { const k = Object.keys(S.files); S.active = k.length ? k[0] : null; }
+  renderFileList(); renderContent(); updateOvlPanel();
+}
+
+function setActive(id) {
+  S.active = id;
+  S.slices = { axial:{i:0}, coronal:{i:0}, sagittal:{i:0} };
+  const f = S.files[id];
+  if (f) {
+    if (f.modality === 'RTPLAN') S.tab = 'plan';
+    else if (f.modality === 'RTSTRUCT') S.tab = 'struct';
+    else S.tab = 'viewer';
+    if (f.modality === 'CT') { S.wc = f.wc||40; S.ww = f.ww||400; }
+  }
+  renderFileList(); renderContent();
+}
+
+// ── Overlay ───────────────────────────────────────────────────────────────────
+function updateOvlPanel() {
+  const cts = Object.values(S.files).filter(f => f.modality==='CT');
+  const doses = Object.values(S.files).filter(f => f.modality==='RTDOSE');
+  const panel = document.getElementById('ovlPanel');
+  if (cts.length && doses.length) {
+    panel.style.display = 'block';
+    document.getElementById('ovlCT').innerHTML = cts.map(f=>`<option value="${f.id}">${fmtName(f.patientName)} — ${f.seriesDesc||'CT'}</option>`).join('');
+    document.getElementById('ovlDose').innerHTML = doses.map(f=>`<option value="${f.id}">${fmtName(f.patientName)} — ${f.seriesDesc||'RT Dose'}</option>`).join('');
+  } else {
+    panel.style.display = 'none';
+    if (S.overlay) { S.overlay=false; renderContent(); }
+  }
+}
+function ovlOpChange(v) { S.ovlOpacity=v/100; document.getElementById('ovlOpVal').textContent=v+'%'; if(S.overlay)reloadSlices(); }
+function toggleOverlay() {
+  S.overlay=!S.overlay;
+  const btn=document.getElementById('btnOvl');
+  if(btn){btn.textContent=S.overlay?'Overlay ausblenden':'Overlay anzeigen'; btn.classList.toggle('on',S.overlay);}
+  S.slices={axial:{i:0},coronal:{i:0},sagittal:{i:0}};
+  renderContent();
+}
+function getOvlIds() {
+  const ct=document.getElementById('ovlCT'); const d=document.getElementById('ovlDose');
+  return ct&&d ? {ctId:ct.value, doseId:d.value} : null;
+}
+
+// ── UI Rendering ──────────────────────────────────────────────────────────────
+function renderFileList() {
+  const el=document.getElementById('fileList');
+  const ids=Object.keys(S.files);
+  if(!ids.length){el.innerHTML='<div class="empty-hint">Keine Dateien geladen.<br>DCM-Dateien per Drag &amp; Drop hinzufügen.<br><br>🔒 Alle Daten bleiben lokal.</div>';return;}
+  el.innerHTML=ids.map(id=>{
+    const f=S.files[id];
+    const extra=f.modality==='CT'&&f.numSlices?` (${f.numSlices}x)`:'';
+    return `<div class="file-item ${id===S.active?'active':''}" onclick="setActive('${id}')">
+      <span class="mbadge mod-${f.modality}">${modLabel(f.modality)}</span>
+      <button class="fremove" onclick="event.stopPropagation();removeFile('${id}')">✕</button>
+      <div class="fpatient">${fmtName(f.patientName)}</div>
+      <div class="fdesc">${f.seriesDesc||f.studyDesc||f.filename||''}${extra}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderContent() {
+  const el=document.getElementById('content');
+  const f=S.active?S.files[S.active]:null;
+  if(!f){el.innerHTML='<div class="no-file"><div class="big">🏥</div><div style="font-size:16px;color:var(--text);font-weight:500">DICOM Viewer</div><div style="font-size:12px;max-width:300px;text-align:center;line-height:1.6;color:var(--text2)">DICOM-Dateien per Drag &amp; Drop laden.<br><strong style="color:var(--accent2)">🔒 Alles bleibt lokal — kein Upload.</strong></div></div>';return;}
+  const mod=f.modality;
+  const tabs=[];
+  if(mod==='CT'||mod==='RTDOSE') tabs.push({id:'viewer',label:S.overlay&&mod==='RTDOSE'?'🔀 Overlay':mod==='CT'?'🩻 CT':'🌡 RT Dose'});
+  if(mod==='RTPLAN') tabs.push({id:'plan',label:'📋 Plan'});
+  if(mod==='RTSTRUCT') tabs.push({id:'struct',label:'🔷 Strukturen'});
+  tabs.push({id:'meta',label:'ℹ Metadaten'});
+  if(!tabs.find(t=>t.id===S.tab)) S.tab=tabs[0].id;
+
+  el.innerHTML=`<div class="vp">
+    <div class="pbar">
+      <div class="ic"><span class="ic-lbl">Patient</span><span class="ic-val">${fmtName(f.patientName)}</span></div>
+      <div class="ic"><span class="ic-lbl">ID</span><span class="ic-val">${f.patientID||'—'}</span></div>
+      <div class="ic"><span class="ic-lbl">Studie</span><span class="ic-val">${f.studyDate?fmtDate(f.studyDate):'—'}</span></div>
+      <div class="ic"><span class="ic-lbl">Institution</span><span class="ic-val">${f.institution||'—'}</span></div>
+      <div class="ic"><span class="ic-lbl">Modalität</span><span class="ic-val"><span class="mbadge mod-${mod}">${modLabel(mod)}</span>${S.overlay&&mod==='RTDOSE'?' <span class="mbadge mod-CT">+ CT</span>':''}</span></div>
+    </div>
+    <div class="tabs">${tabs.map(t=>`<div class="tab ${S.tab===t.id?'active':''}" onclick="switchTab('${t.id}')">${t.label}</div>`).join('')}</div>
+    <div id="tc" style="flex:1;display:flex;flex-direction:column;overflow:hidden;"></div>
+  </div>`;
+  renderTab();
+}
+
+function switchTab(id){S.tab=id;renderContent();}
+
+function renderTab(){
+  const tc=document.getElementById('tc'); if(!tc) return;
+  const f=S.files[S.active]; if(!f) return;
+  if(S.tab==='viewer') renderImgViewer(tc,f);
+  else if(S.tab==='plan') renderPlan(tc,f);
+  else if(S.tab==='struct') renderStruct(tc,f);
+  else renderMeta(tc,f);
+}
+
+// ── Image Viewer ──────────────────────────────────────────────────────────────
+function renderImgViewer(container, f) {
+  const mod=f.modality; const isOvl=S.overlay&&mod==='RTDOSE';
+  const isCT=mod==='CT'; const isDose=mod==='RTDOSE';
+  const has3D = (mod==='CT'&&f.numSlices>1)||(mod==='RTDOSE'&&f.numFrames>1)||(isOvl);
+  const axes = has3D ? ['axial','coronal','sagittal'] : ['axial'];
+
+  // Initialize WC/WW from CT metadata
+  if (isCT && f.series) { if(S.wc===40&&S.ww===400){S.wc=f.wc||40;S.ww=f.ww||400;} }
+
+  let ctrl='';
+  if(isCT||isOvl){
+    ctrl=`<div class="cg"><label>WC</label>
+      <input type="range" id="wcS" min="-1000" max="3000" value="${S.wc}" oninput="onW()">
+      <input type="number" id="wcI" value="${S.wc}" min="-1000" max="3000" style="width:62px" onchange="onW()">
+    </div><div class="cg"><label>WW</label>
+      <input type="range" id="wwS" min="1" max="4000" value="${S.ww}" oninput="onW()">
+      <input type="number" id="wwI" value="${S.ww}" min="1" max="4000" style="width:62px" onchange="onW()">
+    </div><div class="cg"><label>Preset</label>
+      <select onchange="applyPreset(this.value)">
+        <option value="">—</option><option value="40,400">Weichteil</option>
+        <option value="40,80">Gehirn</option><option value="400,1500">Knochen</option>
+        <option value="-600,1600">Lunge</option><option value="60,360">Bauch</option>
+      </select></div>`;
+    if(isOvl) ctrl+=`<div class="csep"></div><div class="cg"><label style="color:var(--dose)">Max: ${f.maxDose?.toFixed(2)||'?'} Gy</label></div>`;
+  } else if(isDose){
+    ctrl=`<div class="cg"><label>Max: <strong style="color:var(--dose)">${f.maxDose?.toFixed(2)||'?'} Gy</strong></label></div>
+      <div class="cg"><label>${f.units||'GY'} &bull; ${f.summationType||'—'}</label></div>`;
+  }
+
+  const panels=axes.map(a=>{
+    const lbl={axial:'Axial',coronal:'Koronal',sagittal:'Sagittal'}[a];
+    return `<div class="sp" id="sp-${a}">
+      <div class="sp-lbl">${lbl}</div><div class="sp-pos" id="pos-${a}"></div>
+      <div class="sp-wrap"><canvas id="cv-${a}"></canvas><div id="ld-${a}" class="sp-loading">Lade...</div></div>
+      <div class="sp-scroll">
+        <input type="range" id="sl-${a}" min="0" max="100" value="${S.slices[a].i}" oninput="onSlide('${a}',this.value)">
+        <span id="sn-${a}">—</span>
+      </div>
+    </div>`;
+  }).join('');
+
+  const cbHTML=isDose?`<div class="cbwrap"><canvas id="cbCanvas"></canvas></div>`:'';
+  container.innerHTML=`<div class="img-viewer"><div class="cbar">${ctrl}</div><div class="panels">${panels}${cbHTML}</div></div>`;
+
+  axes.forEach(a=>drawSlice(a));
+  if(isDose){const cb=document.getElementById('cbCanvas'); if(cb) renderColorbar(cb, f.maxDose||1);}
+}
+
+function drawSlice(axis) {
+  const f=S.files[S.active]; if(!f) return;
+  const mod=f.modality; const isOvl=S.overlay&&mod==='RTDOSE';
+  const cv=document.getElementById(`cv-${axis}`);
+  const ld=document.getElementById(`ld-${axis}`);
+  const sl=document.getElementById(`sl-${axis}`);
+  const sn=document.getElementById(`sn-${axis}`);
+  const pos=document.getElementById(`pos-${axis}`);
+  if(!cv) return;
+  if(ld) ld.style.display='none';
+  const idx=S.slices[axis].i;
+
+  try {
+    if(isOvl) {
+      const ids=getOvlIds(); if(!ids) return;
+      const ctF=S.files[ids.ctId]; const doseF=S.files[ids.doseId];
+      if(!ctF||!doseF||!ctF.series) return;
+      const {series} = ctF;
+      series.buildVolume();
+      const nz=series.nz,ny=series.ny,nx=series.nx;
+      let dims,ctSlice,doseSlice,w,h;
+      if(axis==='axial'){
+        const i=Math.min(idx,nz-1); S.slices.axial.i=i;
+        dims={nz,ny,nx}; w=nx; h=ny;
+        ctSlice=series.axialSlice(i);
+        const ctSl=series.slices[i];
+        doseSlice=resampleDoseOnCT(doseF, ctSl, ctSl.z);
+        if(sl){sl.max=nz-1;sl.value=i;}
+        if(sn) sn.textContent=`${i+1}/${nz}`;
+        if(pos) pos.textContent=`z=${ctSl.z.toFixed(1)}mm`;
+      } else if(axis==='coronal'){
+        const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
+        const ct=series.coronalSlice(i);
+        w=ct.cols; h=ct.rows;
+        // Dose: for coronal, resample column-by-column (approx: use dose coronal at matching y)
+        const ctIPP0=series.slices[0].ipp; const ctSp=series.spacing;
+        const worldY=ctIPP0[1]+i*ctSp[0];
+        const doseRowF=(worldY-doseF.ipp[1])/doseF.spacing[0];
+        const doseY=Math.max(0,Math.min(doseF.rows-1,Math.round(doseRowF)));
+        const dc=doseCoronalSlice(doseF, doseY);
+        // Resize dose coronal to match CT coronal dimensions (approx)
+        const doseRS=new Float32Array(h*w);
+        for(let r=0;r<h;r++) for(let c=0;c<w;c++){
+          const ctZ=series.slices[Math.min(r,nz-1)].z;
+          const dz=(ctZ-doseF.ipp[2]);
+          const doseZF=doseF.zPos.findIndex(z=>z>=ctZ);
+          const dZI=Math.max(0,Math.min(doseF.numFrames-1,doseZF));
+          const ctX=ctIPP0[0]+c*ctSp[1];
+          const dXF=(ctX-doseF.ipp[0])/doseF.spacing[1];
+          const dXI=Math.max(0,Math.min(doseF.cols-1,Math.round(dXF)));
+          doseRS[r*w+c]=dc.data[dZI*dc.cols+dXI]||0;
+        }
+        ctSlice=ct.data; doseSlice=doseRS;
+        if(sl){sl.max=ny-1;sl.value=i;}
+        if(sn) sn.textContent=`${i+1}/${ny}`;
+      } else {
+        const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
+        const ct=series.sagittalSlice(i);
+        w=ct.cols; h=ct.rows;
+        const ctIPP0=series.slices[0].ipp; const ctSp=series.spacing;
+        const worldX=ctIPP0[0]+i*ctSp[1];
+        const doseColF=(worldX-doseF.ipp[0])/doseF.spacing[1];
+        const doseX=Math.max(0,Math.min(doseF.cols-1,Math.round(doseColF)));
+        const ds2=doseSagittalSlice(doseF, doseX);
+        const doseRS=new Float32Array(h*w);
+        for(let r=0;r<h;r++) for(let c=0;c<w;c++){
+          const ctZ=series.slices[Math.min(r,nz-1)].z;
+          const dZI=Math.max(0,doseF.zPos.findIndex(z=>z>=ctZ));
+          const ctY=ctIPP0[1]+c*ctSp[0];
+          const dYF=(ctY-doseF.ipp[1])/doseF.spacing[0];
+          const dYI=Math.max(0,Math.min(doseF.rows-1,Math.round(dYF)));
+          doseRS[r*w+c]=ds2.data[dZI*ds2.cols+dYI]||0;
+        }
+        ctSlice=ct.data; doseSlice=doseRS;
+        if(sl){sl.max=nx-1;sl.value=i;}
+        if(sn) sn.textContent=`${i+1}/${nx}`;
+      }
+      renderOverlay(cv, ctSlice, doseSlice, w, h, S.wc, S.ww, S.ovlOpacity, 0.05, doseF.maxDose||1);
+
+    } else if(mod==='CT') {
+      const {series}=f; if(!series) return;
+      const nz=series.nz,ny=series.ny,nx=series.nx;
+      if(axis==='axial'){
+        const i=Math.min(idx,nz-1); S.slices.axial.i=i;
+        renderGray(cv, series.axialSlice(i), nx, ny, S.wc, S.ww);
+        if(sl){sl.max=nz-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nz}`;
+        if(pos) pos.textContent=`z=${series.slices[i].z.toFixed(1)}mm`;
+      } else if(axis==='coronal'){
+        series.buildVolume();
+        const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
+        const {data,rows,cols}=series.coronalSlice(i);
+        renderGray(cv, data, cols, rows, S.wc, S.ww);
+        if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`;
+      } else {
+        series.buildVolume();
+        const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
+        const {data,rows,cols}=series.sagittalSlice(i);
+        renderGray(cv, data, cols, rows, S.wc, S.ww);
+        if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`;
+      }
+    } else if(mod==='RTDOSE') {
+      const nz=f.numFrames,ny=f.rows,nx=f.cols;
+      if(axis==='axial'){
+        const i=Math.min(idx,nz-1); S.slices.axial.i=i;
+        renderJet(cv, doseAxialSlice(f,i), nx, ny, f.maxDose||1);
+        if(sl){sl.max=nz-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nz}`;
+        if(pos) pos.textContent=`z=${f.zPos[i]?.toFixed(1)}mm`;
+      } else if(axis==='coronal'){
+        const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
+        const {data,rows,cols}=doseCoronalSlice(f,i);
+        renderJet(cv, data, cols, rows, f.maxDose||1);
+        if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`;
+      } else {
+        const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
+        const {data,rows,cols}=doseSagittalSlice(f,i);
+        renderJet(cv, data, cols, rows, f.maxDose||1);
+        if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`;
+      }
+    }
+  } catch(e) {
+    if(ld){ld.style.display='block'; ld.textContent='Fehler: '+e.message;}
+    console.error(e);
+  }
+}
+
+function onSlide(axis, v) { S.slices[axis].i=parseInt(v); drawSlice(axis); }
+function reloadSlices() { ['axial','coronal','sagittal'].forEach(a=>{ if(document.getElementById(`cv-${a}`)) drawSlice(a); }); }
+function onW() {
+  const wcS=document.getElementById('wcS'),wcI=document.getElementById('wcI');
+  const wwS=document.getElementById('wwS'),wwI=document.getElementById('wwI');
+  if(!wcS) return;
+  const src=document.activeElement;
+  if(src===wcS||src===wcI){S.wc=+src.value; if(wcS)wcS.value=S.wc; if(wcI)wcI.value=S.wc;}
+  if(src===wwS||src===wwI){S.ww=+src.value; if(wwS)wwS.value=S.ww; if(wwI)wwI.value=S.ww;}
+  clearTimeout(window._wt); window._wt=setTimeout(reloadSlices,100);
+}
+function applyPreset(v){
+  if(!v) return; const [wc,ww]=v.split(',').map(Number); S.wc=wc; S.ww=ww;
+  const wcS=document.getElementById('wcS'),wcI=document.getElementById('wcI');
+  const wwS=document.getElementById('wwS'),wwI=document.getElementById('wwI');
+  if(wcS)wcS.value=wc; if(wcI)wcI.value=wc; if(wwS)wwS.value=ww; if(wwI)wwI.value=ww;
+  reloadSlices();
+}
+
+// ── RT Plan View ──────────────────────────────────────────────────────────────
+function renderPlan(container, f) {
+  const fg=f.fractionGroups?.[0]||{}; const beams=f.beams||[];
+  const mu={}; (fg.beamDoses||[]).forEach(b=>mu[b.beamNum]=b);
+  const fmtArr=a=>Array.isArray(a)?a.map(v=>parseFloat(v).toFixed(1)).join(', '):a||'—';
+  function row(k,v){if(!v&&v!==0)return '';return `<div class="pr"><span class="k">${k}</span><span class="v">${v}</span></div>`;}
+  container.innerHTML=`<div class="plan-view">
+    <div class="cards">
+      <div class="card"><h3><span class="dot"></span>Plan</h3>
+        ${row('Label',f.planLabel)}${row('Name',f.planName)}${row('Datum',f.planDate?fmtDate(f.planDate):'—')}${row('Geometrie',f.planGeometry)}
+      </div>
+      <div class="card"><h3><span class="dot" style="background:var(--accent)"></span>Fraktionierung</h3>
+        ${row('Fraktionen',fg.fractions)}${row('Beams',fg.numBeams)}
+        ${row('Maschine',(beams[1]||beams[0]||{}).machine)}
+        ${row('Strahlung',[...new Set(beams.map(b=>b.radType).filter(Boolean))].join(', '))}
+      </div>
+      ${(beams[1]||beams[0])?.cp0?.isocenter?`<div class="card"><h3><span class="dot" style="background:var(--dose)"></span>Isozentrum</h3>
+        ${row('Position (mm)',fmtArr((beams[1]||beams[0]).cp0.isocenter))}
+        ${row('Energie',(beams[1]||beams[0]).cp0.energy+' MV')}
+      </div>`:''}
+    </div>
+    <div class="sec">Beams (${beams.length})</div>
+    <table class="btbl"><thead><tr><th>#</th><th>Name</th><th>Typ</th><th>Delivery</th><th>Gantry</th><th>Kollimator</th><th>Couch</th><th>Energie</th><th>MU</th><th>CP</th></tr></thead>
+    <tbody>${beams.map(b=>{
+      const cp=b.cp0||{}; const m=mu[b.num]||{};
+      return `<tr><td>${b.num}</td><td style="font-weight:500">${b.name||'—'}</td>
+        <td class="${b.type==='DYNAMIC'?'bDYNAMIC':''}">${b.type||'—'}</td>
+        <td class="${b.delivery==='TREATMENT'?'bTREATMENT':'bSETUP'}">${b.delivery||'—'}</td>
+        <td>${cp.gantryAngle!=null?cp.gantryAngle+'°':'—'}</td>
+        <td>${cp.collimatorAngle!=null?cp.collimatorAngle+'°':'—'}</td>
+        <td>${cp.couchAngle!=null?cp.couchAngle+'°':'—'}</td>
+        <td>${cp.energy!=null?cp.energy+' MV':'—'}</td>
+        <td>${m.meterset!=null?parseFloat(m.meterset).toFixed(1):'—'}</td>
+        <td>${b.nCP||'—'}</td></tr>`;
+    }).join('')}</tbody></table>
+  </div>`;
+}
+
+function renderStruct(container, f) {
+  const rois=f.rois||[];
+  container.innerHTML=`<div class="plan-view"><div class="sec">Strukturen (${rois.length})</div>
+    <div class="rgrid">${rois.map(r=>{
+      const c=Array.isArray(r.color)?`rgb(${r.color.join(',')})` :'#888';
+      return `<div class="ritem"><div class="rcolor" style="background:${c}"></div><div><div class="rname">${r.name||'—'}</div><div class="rnum">ROI #${r.num}</div></div></div>`;
+    }).join('')}</div></div>`;
+}
+
+function renderMeta(container, f) {
+  const skip=['series','hu','gy','slices','rois','beams','fractionGroups','_volume'];
+  const entries=Object.entries(f).filter(([k,v])=>!skip.includes(k)&&v!=null&&typeof v!=='object');
+  function row(k,v){return `<div class="pr"><span class="k">${k}</span><span class="v">${v}</span></div>`;}
+  container.innerHTML=`<div class="plan-view"><div class="card" style="max-width:560px">
+    <h3><span class="dot"></span>Metadaten</h3>
+    ${entries.map(([k,v])=>row(k,String(v))).join('')}
+  </div></div>`;
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────────────────────
+const dz=document.getElementById('dz');
+window.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
+window.addEventListener('dragleave',e=>{if(!e.relatedTarget)dz.classList.remove('dragover');});
+window.addEventListener('drop',e=>{
+  e.preventDefault(); dz.classList.remove('dragover');
+  const files=[...e.dataTransfer.files];
+  if(!files.length) return;
+  loadFiles(files);
+});
+dz.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();});
+dz.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();dz.classList.remove('dragover');loadFiles([...e.dataTransfer.files]);});
+document.getElementById('fi').addEventListener('change',function(){loadFiles([...this.files]);this.value='';});
+</script>
+</body>
+</html>
