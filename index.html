@@ -366,10 +366,14 @@ class CTSeries {
     this.nz = slices.length;
     this.ny = slices[0].rows;
     this.nx = slices[0].cols;
-    this.spacing = slices[0].spacing;
+    this.spacing = slices[0].spacing; // [rowSpacing, colSpacing] in mm
     this.ipp = slices[0].ipp;
     this.wc = slices[0].wc; this.ww = slices[0].ww;
     this._volume = null;
+    // Z spacing between slices (mm)
+    this.zSpacing = slices.length > 1
+      ? Math.abs(this.slices[1].z - this.slices[0].z)
+      : parseFloat(slices[0].sliceThickness || slices[0].spacing[0] || 1);
   }
   buildVolume() {
     if (this._volume) return;
@@ -493,6 +497,18 @@ function renderOverlay(canvas, ctData, doseData, width, height, wc, ww, opacity,
     img.data[i*4+3]=255;
   }
   ctx.putImageData(img,0,0);
+}
+
+// Render raw data to offscreen canvas then draw scaled to target (for correct aspect ratio)
+function renderScaled(targetCanvas, data, dataW, dataH, displayW, displayH, renderFn) {
+  const off = document.createElement('canvas');
+  if (data !== null) renderFn(off, data, dataW, dataH);
+  else renderFn(off); // overlay case: renderFn handles everything
+  targetCanvas.width = displayW; targetCanvas.height = displayH;
+  const ctx = targetCanvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(off, 0, 0, displayW, displayH);
 }
 
 function renderColorbar(canvas, maxDose) {
@@ -745,19 +761,15 @@ function drawSlice(axis) {
         if(pos) pos.textContent=`z=${ctSl.z.toFixed(1)}mm`;
       } else if(axis==='coronal'){
         const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
-        const ct=series.coronalSlice(i);
-        w=ct.cols; h=ct.rows;
-        // Dose: for coronal, resample column-by-column (approx: use dose coronal at matching y)
+        const ct=series.coronalSlice(i); w=ct.cols; h=ct.rows; // w=nx, h=nz
         const ctIPP0=series.slices[0].ipp; const ctSp=series.spacing;
         const worldY=ctIPP0[1]+i*ctSp[0];
         const doseRowF=(worldY-doseF.ipp[1])/doseF.spacing[0];
         const doseY=Math.max(0,Math.min(doseF.rows-1,Math.round(doseRowF)));
         const dc=doseCoronalSlice(doseF, doseY);
-        // Resize dose coronal to match CT coronal dimensions (approx)
         const doseRS=new Float32Array(h*w);
         for(let r=0;r<h;r++) for(let c=0;c<w;c++){
           const ctZ=series.slices[Math.min(r,nz-1)].z;
-          const dz=(ctZ-doseF.ipp[2]);
           const doseZF=doseF.zPos.findIndex(z=>z>=ctZ);
           const dZI=Math.max(0,Math.min(doseF.numFrames-1,doseZF));
           const ctX=ctIPP0[0]+c*ctSp[1];
@@ -766,12 +778,13 @@ function drawSlice(axis) {
           doseRS[r*w+c]=dc.data[dZI*dc.cols+dXI]||0;
         }
         ctSlice=ct.data; doseSlice=doseRS;
-        if(sl){sl.max=ny-1;sl.value=i;}
-        if(sn) sn.textContent=`${i+1}/${ny}`;
+        const scaleZ=series.zSpacing/ctSp[1];
+        const dispH=Math.round(h*scaleZ);
+        renderScaled(cv, null, w, h, w, dispH, (c)=>renderOverlay(c,ctSlice,doseSlice,w,h,S.wc,S.ww,S.ovlOpacity,0.05,doseF.maxDose||1));
+        if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`; return;
       } else {
         const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
-        const ct=series.sagittalSlice(i);
-        w=ct.cols; h=ct.rows;
+        const ct=series.sagittalSlice(i); w=ct.cols; h=ct.rows; // w=ny, h=nz
         const ctIPP0=series.slices[0].ipp; const ctSp=series.spacing;
         const worldX=ctIPP0[0]+i*ctSp[1];
         const doseColF=(worldX-doseF.ipp[0])/doseF.spacing[1];
@@ -787,14 +800,17 @@ function drawSlice(axis) {
           doseRS[r*w+c]=ds2.data[dZI*ds2.cols+dYI]||0;
         }
         ctSlice=ct.data; doseSlice=doseRS;
-        if(sl){sl.max=nx-1;sl.value=i;}
-        if(sn) sn.textContent=`${i+1}/${nx}`;
+        const scaleZ=series.zSpacing/ctSp[0];
+        const dispH=Math.round(h*scaleZ);
+        renderScaled(cv, null, w, h, w, dispH, (c)=>renderOverlay(c,ctSlice,doseSlice,w,h,S.wc,S.ww,S.ovlOpacity,0.05,doseF.maxDose||1));
+        if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`; return;
       }
       renderOverlay(cv, ctSlice, doseSlice, w, h, S.wc, S.ww, S.ovlOpacity, 0.05, doseF.maxDose||1);
 
     } else if(mod==='CT') {
       const {series}=f; if(!series) return;
       const nz=series.nz,ny=series.ny,nx=series.nx;
+      const rSp=series.spacing[0], cSp=series.spacing[1], zSp=series.zSpacing;
       if(axis==='axial'){
         const i=Math.min(idx,nz-1); S.slices.axial.i=i;
         renderGray(cv, series.axialSlice(i), nx, ny, S.wc, S.ww);
@@ -803,18 +819,24 @@ function drawSlice(axis) {
       } else if(axis==='coronal'){
         series.buildVolume();
         const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
-        const {data,rows,cols}=series.coronalSlice(i);
-        renderGray(cv, data, cols, rows, S.wc, S.ww);
+        const {data,rows,cols}=series.coronalSlice(i); // rows=nz, cols=nx
+        const scaleZ=zSp/cSp;
+        renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
+          (c,d,w,h)=>renderGray(c,d,w,h,S.wc,S.ww));
         if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`;
       } else {
         series.buildVolume();
         const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
-        const {data,rows,cols}=series.sagittalSlice(i);
-        renderGray(cv, data, cols, rows, S.wc, S.ww);
+        const {data,rows,cols}=series.sagittalSlice(i); // rows=nz, cols=ny
+        const scaleZ=zSp/rSp;
+        renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
+          (c,d,w,h)=>renderGray(c,d,w,h,S.wc,S.ww));
         if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`;
       }
     } else if(mod==='RTDOSE') {
       const nz=f.numFrames,ny=f.rows,nx=f.cols;
+      const dSp=f.spacing; // [rowSpacing, colSpacing]
+      const dZSp=f.zPos.length>1?Math.abs(f.zPos[1]-f.zPos[0]):dSp[0];
       if(axis==='axial'){
         const i=Math.min(idx,nz-1); S.slices.axial.i=i;
         renderJet(cv, doseAxialSlice(f,i), nx, ny, f.maxDose||1);
@@ -822,13 +844,17 @@ function drawSlice(axis) {
         if(pos) pos.textContent=`z=${f.zPos[i]?.toFixed(1)}mm`;
       } else if(axis==='coronal'){
         const i=Math.min(idx,ny-1); S.slices.coronal.i=i;
-        const {data,rows,cols}=doseCoronalSlice(f,i);
-        renderJet(cv, data, cols, rows, f.maxDose||1);
+        const {data,rows,cols}=doseCoronalSlice(f,i); // rows=nz, cols=nx
+        const scaleZ=dZSp/dSp[1];
+        renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
+          (c,d,w,h)=>renderJet(c,d,w,h,f.maxDose||1));
         if(sl){sl.max=ny-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${ny}`;
       } else {
         const i=Math.min(idx,nx-1); S.slices.sagittal.i=i;
-        const {data,rows,cols}=doseSagittalSlice(f,i);
-        renderJet(cv, data, cols, rows, f.maxDose||1);
+        const {data,rows,cols}=doseSagittalSlice(f,i); // rows=nz, cols=ny
+        const scaleZ=dZSp/dSp[0];
+        renderScaled(cv, data, cols, rows, cols, Math.round(rows*scaleZ),
+          (c,d,w,h)=>renderJet(c,d,w,h,f.maxDose||1));
         if(sl){sl.max=nx-1;sl.value=i;} if(sn) sn.textContent=`${i+1}/${nx}`;
       }
     }
