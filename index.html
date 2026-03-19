@@ -1083,7 +1083,7 @@ function applyTransform(axis) {
   const {rot, flipH, zoom=1, panX=0, panY=0} = S.slices[axis];
   const scaleX = flipH ? -1 : 1;
   cv.style.transform = `translate(${panX}px,${panY}px) scale(${zoom}) rotate(${rot}deg) scaleX(${scaleX})`;
-  if(wrap) wrap.style.cursor = (_drag[axis]?.active ? 'grabbing' : zoom > 1.01 ? 'grab' : 'crosshair');
+  if(wrap) wrap.style.cursor = _drag[axis]?.active ? 'grabbing' : 'crosshair';
 }
 function rotate(axis, deg) {
   S.slices[axis].rot = ((S.slices[axis].rot + deg) % 360 + 360) % 360;
@@ -1104,19 +1104,12 @@ const _drag = { axial:{}, coronal:{}, sagittal:{} };
 
 function onWheelZoom(e, axis) {
   e.preventDefault();
-  const wrap = document.getElementById(`wrap-${axis}`); if(!wrap) return;
-  const sl = S.slices[axis];
-  const factor = e.deltaY < 0 ? 1.15 : 1/1.15;
-  const newZoom = Math.max(0.5, Math.min(16, (sl.zoom||1) * factor));
-  // Zoom toward cursor (relative to wrap center)
-  const wr = wrap.getBoundingClientRect();
-  const cx = e.clientX - wr.left - wr.width/2;
-  const cy = e.clientY - wr.top  - wr.height/2;
-  const oz = sl.zoom||1;
-  sl.panX = cx - (cx - (sl.panX||0)) * newZoom/oz;
-  sl.panY = cy - (cy - (sl.panY||0)) * newZoom/oz;
-  sl.zoom = newZoom;
-  applyTransform(axis);
+  const sl = document.getElementById(`sl-${axis}`);
+  if(!sl) return;
+  const step = e.deltaY > 0 ? 1 : -1;
+  const newVal = Math.max(0, Math.min(parseInt(sl.max), parseInt(sl.value) + step));
+  sl.value = newVal;
+  onSlide(axis, newVal);
 }
 
 function zoomPanel(axis, factor) {
